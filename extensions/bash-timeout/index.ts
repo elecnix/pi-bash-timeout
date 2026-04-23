@@ -7,8 +7,8 @@ const AGENT_DIR = path.join(process.env.HOME || "", ".pi", "agent");
 const CONFIG_FILE = path.join(AGENT_DIR, "bash-timeout.json");
 
 interface BashTimeoutConfig {
-	defaultTimeout: number | null;
-	maxTimeout: number | null;
+	defaultTimeout: number; // 0 = infinite (no default), >0 = seconds
+	maxTimeout: number;     // 0 = infinite (no cap), >0 = cap in seconds
 }
 
 const PRESETS = [
@@ -21,21 +21,25 @@ const PRESETS = [
 function loadConfig(): BashTimeoutConfig {
 	try {
 		if (fs.existsSync(CONFIG_FILE)) {
-			return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf-8"));
+			const raw = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf-8"));
+			// Migrate null → 0 for infinite
+			return {
+				defaultTimeout: raw.defaultTimeout ?? 0,
+				maxTimeout: raw.maxTimeout ?? 0,
+			};
 		}
 	} catch {
 		// fall through to defaults
 	}
-	return { defaultTimeout: null, maxTimeout: null };
+	return { defaultTimeout: 0, maxTimeout: 0 };
 }
 
 function saveConfig(config: BashTimeoutConfig): void {
 	fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
 }
 
-function formatTimeout(seconds: number | null): string {
-	if (seconds === null) return "(none)";
-	if (seconds === 0) return "0 (immediate)";
+function formatTimeout(seconds: number): string {
+	if (seconds === 0) return "infinite";
 	const h = Math.floor(seconds / 3600);
 	const m = Math.floor((seconds % 3600) / 60);
 	const s = seconds % 60;
@@ -52,20 +56,20 @@ export default function bashTimeout(pi: ExtensionAPI) {
 	pi.on("tool_call", (event) => {
 		if (!isToolCallEventType("bash", event)) return;
 
-		const input = event.input as { command: string; timeout?: number | null };
+		const input = event.input as { command: string; timeout?: number };
 
 		let desired = input.timeout;
 
-		// Apply default if not set or explicitly null
-		if (desired === undefined || desired === null) {
-			if (config.defaultTimeout !== null) {
+		// Apply default if timeout is undefined
+		if (desired === undefined) {
+			if (config.defaultTimeout > 0) {
 				input.timeout = config.defaultTimeout;
 				desired = config.defaultTimeout;
 			}
 		}
 
 		// Apply max cap
-		if (config.maxTimeout !== null && desired !== undefined && desired !== null && desired > config.maxTimeout) {
+		if (config.maxTimeout > 0 && desired !== undefined && desired > config.maxTimeout) {
 			input.timeout = config.maxTimeout;
 		}
 	});
@@ -77,7 +81,6 @@ export default function bashTimeout(pi: ExtensionAPI) {
 			const action = parts[0] || "show";
 
 			if (action === "show") {
-				// Show current settings with picker
 				const result = await ctx.ui.custom<string | null>((tui, theme, _kb, done) => {
 					let selected = 0;
 					let editMode = false;
@@ -95,7 +98,6 @@ export default function bashTimeout(pi: ExtensionAPI) {
 						lines.push(sep);
 						lines.push("");
 
-						// Current values
 						lines.push(` Default:  ${theme.fg("accent", formatTimeout(config.defaultTimeout))}`);
 						lines.push(` Max cap:  ${theme.fg("accent", formatTimeout(config.maxTimeout))}`);
 						lines.push("");
@@ -109,15 +111,13 @@ export default function bashTimeout(pi: ExtensionAPI) {
 							const otherIdx = PRESETS.length;
 							const prefix = selected === otherIdx ? theme.fg("accent", "> ") : "  ";
 							lines.push(`${prefix} Other... (type seconds)`);
-							const clearIdx = PRESETS.length + 1;
-							const cprefix = selected === clearIdx ? theme.fg("accent", "> ") : "  ";
-							lines.push(`${cprefix} Clear defaults`);
+							const infiniteIdx = PRESETS.length + 1;
+							const iprefix = selected === infiniteIdx ? theme.fg("accent", "> ") : "  ";
+							lines.push(`${iprefix} Infinite (no default)`);
 						} else {
 							const maxHint =
-								config.maxTimeout !== null
-									? ` (max cap: ${config.maxTimeout}s)`
-									: "";
-							lines.push(theme.fg("muted", ` Enter seconds for DEFAULT timeout${maxHint}:`));
+								config.maxTimeout > 0 ? ` (max cap: ${config.maxTimeout}s)` : "";
+							lines.push(theme.fg("muted", ` Enter seconds for DEFAULT${maxHint}:`));
 							lines.push("");
 							const line = ` ${theme.fg("accent", ">>> ")}${theme.fg("text", editBuffer || " ")}`;
 							lines.push(line);
@@ -151,6 +151,13 @@ export default function bashTimeout(pi: ExtensionAPI) {
 							if (data === "KEY_ENTER" || data === "\r") {
 								const secs = parseInt(editBuffer, 10);
 								if (!isNaN(secs) && secs >= 1) {
+									// default cannot exceed max
+									if (config.maxTimeout > 0 && secs > config.maxTimeout) {
+										editBuffer = "";
+										editMode = false;
+										refresh();
+										return;
+									}
 									config = { ...config, defaultTimeout: secs };
 									saveConfig(config);
 									done(`default:${secs}`);
@@ -166,7 +173,6 @@ export default function bashTimeout(pi: ExtensionAPI) {
 								refresh();
 								return;
 							}
-							// Filter to digits only
 							if (/^\d$/.test(data)) {
 								editBuffer += data;
 								refresh();
@@ -186,17 +192,21 @@ export default function bashTimeout(pi: ExtensionAPI) {
 						}
 						if (data === "KEY_ENTER" || data === "\r") {
 							if (selected < PRESETS.length) {
-								config = { ...config, defaultTimeout: PRESETS[selected].value };
-								saveConfig(config);
-								done(`default:${PRESETS[selected].value}`);
+								const secs = PRESETS[selected].value;
+								if (config.maxTimeout > 0 && secs > config.maxTimeout) {
+									// silently skip
+								} else {
+									config = { ...config, defaultTimeout: secs };
+									saveConfig(config);
+									done(`default:${secs}`);
+								}
 							} else if (selected === PRESETS.length) {
-								// Other — switch to edit mode
 								editMode = true;
 								editBuffer = "";
 								refresh();
 							} else {
-								// Clear
-								config = { ...config, defaultTimeout: null };
+								// Infinite
+								config = { ...config, defaultTimeout: 0 };
 								saveConfig(config);
 								done("cleared");
 							}
@@ -208,21 +218,13 @@ export default function bashTimeout(pi: ExtensionAPI) {
 						}
 					}
 
-					return {
-						render,
-						invalidate: () => {
-							cachedLines = undefined;
-						},
-						handleInput,
-					};
+					return { render, invalidate: () => { cachedLines = undefined; }, handleInput };
 				});
 
-				if (!result) {
-					return;
-				}
+				if (!result) return;
 
 				if (result === "cleared") {
-					ctx.ui.notify("Bash default timeout cleared", "info");
+					ctx.ui.notify("Default bash timeout set to infinite", "info");
 					return;
 				}
 
@@ -241,12 +243,22 @@ export default function bashTimeout(pi: ExtensionAPI) {
 
 				if (sub === "default" || sub === "def") {
 					if (!value) {
-						ctx.ui.notify("Usage: /timeout set default <seconds|null>", "error");
+						ctx.ui.notify("Usage: /timeout set default <seconds|infinite>", "error");
 						return;
 					}
-					const secs = value === "null" ? null : parseInt(value, 10);
-					if (secs !== null && (isNaN(secs) || secs < 1)) {
+					if (value === "infinite") {
+						config = { ...config, defaultTimeout: 0 };
+						saveConfig(config);
+						ctx.ui.notify("Default timeout set to infinite", "success");
+						return;
+					}
+					const secs = parseInt(value, 10);
+					if (isNaN(secs) || secs < 1) {
 						ctx.ui.notify("Invalid timeout value (must be ≥ 1 second)", "error");
+						return;
+					}
+					if (config.maxTimeout > 0 && secs > config.maxTimeout) {
+						ctx.ui.notify(`Default (${secs}s) cannot exceed max (${config.maxTimeout}s)`, "error");
 						return;
 					}
 					config = { ...config, defaultTimeout: secs };
@@ -257,21 +269,37 @@ export default function bashTimeout(pi: ExtensionAPI) {
 
 				if (sub === "max") {
 					if (!value) {
-						ctx.ui.notify("Usage: /timeout set max <seconds|null>", "error");
+						ctx.ui.notify("Usage: /timeout set max <seconds|infinite>", "error");
 						return;
 					}
-					const secs = value === "null" ? null : parseInt(value, 10);
-					if (secs !== null && (isNaN(secs) || secs < 1)) {
+					if (value === "infinite") {
+						config = { ...config, maxTimeout: 0 };
+						saveConfig(config);
+						ctx.ui.notify("Max timeout cap removed (infinite)", "success");
+						return;
+					}
+					const secs = parseInt(value, 10);
+					if (isNaN(secs) || secs < 1) {
 						ctx.ui.notify("Invalid timeout value (must be ≥ 1 second)", "error");
 						return;
 					}
-					config = { ...config, maxTimeout: secs };
-					saveConfig(config);
-					ctx.ui.notify(`Max timeout cap set to ${formatTimeout(secs)}`, "success");
+					// Setting max lower than current default? pull default down
+					if (config.defaultTimeout > secs) {
+						config = { ...config, defaultTimeout: secs, maxTimeout: secs };
+						saveConfig(config);
+						ctx.ui.notify(
+							`Max cap set to ${formatTimeout(secs)} (default also adjusted)`,
+							"success",
+						);
+					} else {
+						config = { ...config, maxTimeout: secs };
+						saveConfig(config);
+						ctx.ui.notify(`Max timeout cap set to ${formatTimeout(secs)}`, "success");
+					}
 					return;
 				}
 
-				ctx.ui.notify("Usage: /timeout set default <n|null> | set max <n|null>", "error");
+				ctx.ui.notify("Usage: /timeout set default <n|infinite> | set max <n|infinite>", "error");
 				return;
 			}
 
@@ -285,7 +313,7 @@ export default function bashTimeout(pi: ExtensionAPI) {
 
 			ctx.ui.notify(
 				`Bash timeout — default: ${formatTimeout(config.defaultTimeout)}, max: ${formatTimeout(config.maxTimeout)}\n` +
-					`Usage: /timeout [show|get|set default <n|null>|set max <n|null>]`,
+					`Usage: /timeout [show|get|set default <n|infinite>|set max <n|infinite>]`,
 				"info",
 			);
 		},
