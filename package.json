@@ -1,0 +1,10 @@
+{
+  "name": "bash-timeout",
+  "version": "1.0.0",
+  "description": "Slash command to get/set bash tool default and max timeout, with interactive picker",
+  "keywords": ["pi-coding-agent", "pi-package", "pi-extension", "pi-skill"],
+  "pi": {
+    "extensions": ["./extensions"],
+    "skills": ["./skills"]
+  }
+}
