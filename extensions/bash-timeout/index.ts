@@ -2,8 +2,6 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { isToolCallEventType } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
-import { join } from "node:path";
 
 const AGENT_DIR = path.join(process.env.HOME || "", ".pi", "agent");
 const CONFIG_FILE = path.join(AGENT_DIR, "bash-timeout.json");
@@ -86,8 +84,6 @@ export default function bashTimeout(pi: ExtensionAPI) {
 					let editBuffer = "";
 					let cachedLines: string[] | undefined;
 
-					const WIDTH = 50;
-
 					function render(width: number): string[] {
 						if (cachedLines) return cachedLines;
 						const lines: string[] = [];
@@ -117,7 +113,11 @@ export default function bashTimeout(pi: ExtensionAPI) {
 							const cprefix = selected === clearIdx ? theme.fg("accent", "> ") : "  ";
 							lines.push(`${cprefix} Clear defaults`);
 						} else {
-							lines.push(theme.fg("muted", " Enter seconds for DEFAULT timeout:"));
+							const maxHint =
+								config.maxTimeout !== null
+									? ` (max cap: ${config.maxTimeout}s)`
+									: "";
+							lines.push(theme.fg("muted", ` Enter seconds for DEFAULT timeout${maxHint}:`));
 							lines.push("");
 							const line = ` ${theme.fg("accent", ">>> ")}${theme.fg("text", editBuffer || " ")}`;
 							lines.push(line);
@@ -132,7 +132,7 @@ export default function bashTimeout(pi: ExtensionAPI) {
 						lines.push(sep);
 
 						cachedLines = lines;
-						return cachedLines;
+						return lines;
 					}
 
 					function refresh() {
@@ -150,7 +150,7 @@ export default function bashTimeout(pi: ExtensionAPI) {
 							}
 							if (data === "KEY_ENTER" || data === "\r") {
 								const secs = parseInt(editBuffer, 10);
-								if (!isNaN(secs) && secs >= 0) {
+								if (!isNaN(secs) && secs >= 1) {
 									config = { ...config, defaultTimeout: secs };
 									saveConfig(config);
 									done(`default:${secs}`);
@@ -166,7 +166,7 @@ export default function bashTimeout(pi: ExtensionAPI) {
 								refresh();
 								return;
 							}
-							// Filter to digits
+							// Filter to digits only
 							if (/^\d$/.test(data)) {
 								editBuffer += data;
 								refresh();
@@ -245,8 +245,8 @@ export default function bashTimeout(pi: ExtensionAPI) {
 						return;
 					}
 					const secs = value === "null" ? null : parseInt(value, 10);
-					if (secs !== null && (isNaN(secs) || secs < 0)) {
-						ctx.ui.notify("Invalid timeout value", "error");
+					if (secs !== null && (isNaN(secs) || secs < 1)) {
+						ctx.ui.notify("Invalid timeout value (must be ≥ 1 second)", "error");
 						return;
 					}
 					config = { ...config, defaultTimeout: secs };
@@ -261,8 +261,8 @@ export default function bashTimeout(pi: ExtensionAPI) {
 						return;
 					}
 					const secs = value === "null" ? null : parseInt(value, 10);
-					if (secs !== null && (isNaN(secs) || secs < 0)) {
-						ctx.ui.notify("Invalid timeout value", "error");
+					if (secs !== null && (isNaN(secs) || secs < 1)) {
+						ctx.ui.notify("Invalid timeout value (must be ≥ 1 second)", "error");
 						return;
 					}
 					config = { ...config, maxTimeout: secs };
