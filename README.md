@@ -9,20 +9,23 @@ The pi coding agent's built-in `bash` tool has **no default timeout** — comman
 1. **Injecting a default timeout** on every bash call that doesn't specify one
 2. **Capping timeouts** that exceed a maximum threshold
 
-Both values can be set to **infinite** (0 = no default / no cap). Values persist across sessions in `~/.pi/agent/bash-timeout.json`.
+## Semantics
+
+- **`0` = infinite** (no default / no cap)
+- **`default` can never exceed `max`** — enforced at set time
+- If `max` is set lower than the current `default`, `default` is automatically lowered to match
+- Settings persist across sessions in `~/.pi/agent/bash-timeout.json`
 
 ## Behavior
 
 The extension intercepts every `bash` tool call via the `tool_call` event:
 
 ```
-timeout = undefined (not specified)  →  apply DEFAULT if set
-timeout < MAX                       →  use as-is
-timeout > MAX                       →  cap to MAX
-timeout = 0                         →  no timeout (passthrough)
+timeout = not specified  →  apply DEFAULT if set (non-zero)
+timeout < MAX           →  use as-is
+timeout > MAX           →  cap to MAX
+timeout = 0             →  no timeout (passthrough)
 ```
-
-**Rule:** `default` can never exceed `max`. If you lower `max` below the current `default`, the `default` is automatically lowered to match.
 
 ## Commands
 
@@ -31,8 +34,8 @@ timeout = 0                         →  no timeout (passthrough)
 Opens a TUI menu showing current default/max values with quick presets:
 
 ```
- Default:  infinite
- Max cap:  infinite
+ Default:  60s
+ Max cap:  1h 0m 0s
 
  Set Default:
 > 60 seconds (60s)
@@ -48,12 +51,12 @@ Navigation: `↑↓` navigate, `Enter` select, `Esc` close
 ### `/timeout get`
 
 ```
-Bash timeout — default: 60s, max: 300s
+Bash timeout — default: 60s, max: infinite
 ```
 
 ### `/timeout set default <n|infinite>`
 
-Sets the default timeout. Use `infinite` to disable.
+Sets the default timeout injected on every bash call. Use `infinite` to disable.
 
 ```bash
 /timeout set default 60          # 60 seconds
@@ -82,7 +85,7 @@ pi install git:github.com/elecnix/pi-bash-timeout
 ```json
 {
   "defaultTimeout": 60,
-  "maxTimeout": 300
+  "maxTimeout": 0
 }
 ```
 
