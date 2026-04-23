@@ -1,3 +1,8 @@
+---
+name: bash-timeout
+description: Get and set the bash tool's default and max timeout with /timeout slash command.
+---
+
 # bash-timeout
 
 Use the `/timeout` slash command to get and set the bash tool's default and max timeout.
