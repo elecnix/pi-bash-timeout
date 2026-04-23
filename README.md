@@ -1,48 +1,105 @@
-# bash-timeout
+# pi-bash-timeout
 
-Slash command to get and set the bash tool's default and max timeout, with an interactive picker menu.
+A [pi-coding-agent](https://github.com/badlogic/pi-mono) extension that enforces default and maximum timeouts on all `bash` tool calls.
 
-## Features
+## Goal
 
-- `/timeout` — interactive menu showing current default/max values with preset quick-picks:
-  - 60 seconds
-  - 5 minutes
-  - 10 minutes
-  - 1 hour
-  - Other... (type any number of seconds)
-  - Clear defaults
-- `/timeout get` — inline notification with current values
-- `/timeout set default <n|null>` — set the default timeout applied to bash calls with no explicit timeout
-- `/timeout set max <n|null>` — set the maximum cap; bash calls requesting more than this get capped
+The pi coding agent's built-in `bash` tool has **no default timeout** — commands run indefinitely unless an explicit `timeout` is passed each time. This extension solves that by:
 
-## How it works
+1. **Injecting a default timeout** on every bash call that doesn't specify one
+2. **Capping timeouts** that exceed a maximum threshold
+
+Values persist across sessions in `~/.pi/agent/bash-timeout.json`.
+
+## Behavior
 
 The extension intercepts every `bash` tool call via the `tool_call` event:
 
-1. If no `timeout` is provided (or it's `null`), the **default** is injected
-2. If the requested timeout exceeds the **max**, it's capped to the max
+1. If `timeout` is `undefined` or `null` → inject the **default**
+2. If `timeout > max` → cap it to the **max**
 
-Values are persisted to `~/.pi/agent/bash-timeout.json`.
+```
+no timeout specified    →  apply DEFAULT
+timeout < max         →  use as-is  
+timeout > max         →  cap to MAX
+timeout = 0           →  no timeout (passthrough)
+```
+
+## Commands
+
+### `/timeout` — Interactive picker
+
+Opens a TUI menu showing current default/max values with quick presets:
+
+```
+ Default:  5s
+ Max cap:  20s
+
+ Set Default:
+> 60 seconds (60s)
+  5 minutes (300s)
+  10 minutes (600s)
+  1 hour (3600s)
+  Other... (type seconds)
+  Clear defaults
+```
+
+Navigation: `↑↓` navigate, `Enter` select, `Esc` close
+
+### `/timeout get`
+
+Shows current values in an inline notification.
+
+```
+Bash timeout — default: 5s, max: 20s
+```
+
+### `/timeout set default <n|null>`
+
+Sets the default timeout (in seconds). Use `null` to clear.
+
+```bash
+/timeout set default 60        # 60 seconds
+/timeout set default null      # clear (no default applied)
+```
+
+### `/timeout set max <n|null>`
+
+Sets the maximum cap. Use `null` to disable.
+
+```bash
+/timeout set max 300           # cap at 5 minutes
+/timeout set max null          # no cap
+```
 
 ## Install
 
 ```bash
-pi install git:github.com/nicobailon/py-bash-timeout
+pi install git:github.com/elecnix/pi-bash-timeout
 ```
 
-Or install locally from this repo:
+This installs the extension from the public GitHub repo. It auto-discovers on next pi restart.
 
-```bash
-pi install git:/home/nicolas/source/py-bash-timeout
+## Persisted config
+
+`~/.pi/agent/bash-timeout.json`:
+```json
+{
+  "defaultTimeout": 60,
+  "maxTimeout": 300
+}
 ```
 
-## Usage
+## Architecture
 
 ```
-/timeout              # Interactive picker (current values + quick presets)
-/timeout get         # Show current default and max timeout
-/timeout set default 60        # Set default to 60 seconds
-/timeout set default null      # Clear default (no default applied)
-/timeout set max 300           # Cap max to 5 minutes
-/timeout set max null         # Clear max cap
+extensions/bash-timeout/index.ts
+├── tool_call handler  → injects default / caps max timeout on every bash call
+├── /timeout command   → interactive picker + get/set/subcommand handlers
+└── JSON config I/O     → persists settings to ~/.pi/agent/bash-timeout.json
 ```
+
+## Requirements
+
+- pi-coding-agent v0.69+
+- Node.js 20+
