@@ -82,7 +82,7 @@ export default function bashTimeout(pi: ExtensionAPI) {
 
 			if (action === "show") {
 				const result = await ctx.ui.custom<string | null>((tui, theme, _kb, done) => {
-					let selected = 0;
+					let selected = PRESETS.length + 1;
 					let editMode = false;
 					let editBuffer = "";
 					let cachedLines: string[] | undefined;
